@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2014, 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, 2017-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -17,6 +17,7 @@
 #include <linux/nvmem-consumer.h>
 #include <linux/slab.h>
 #include <soc/qcom/subsystem_restart.h>
+#include <linux/regulator/consumer.h>
 
 #define Q6_PIL_GET_DELAY_MS 100
 #define BOOT_CMD 1
@@ -63,7 +64,10 @@ static void adsp_load_fw(struct work_struct *adsp_ldr_work)
 	int rc = 0;
 	u32 adsp_state;
 	const char *img_name;
-
+#ifdef VENDOR_EDIT
+	struct regulator *vdd_2v8 = NULL;
+	struct regulator *vdd_1v8 = NULL;
+#endif
 	if (!pdev) {
 		dev_err(&pdev->dev, "%s: Platform device null\n", __func__);
 		goto fail;
@@ -74,6 +78,38 @@ static void adsp_load_fw(struct work_struct *adsp_ldr_work)
 			"%s: Device tree information missing\n", __func__);
 		goto fail;
 	}
+#ifdef VENDOR_EDIT
+	vdd_2v8 = regulator_get(&pdev->dev, "vdd");
+	vdd_1v8 = regulator_get(&pdev->dev, "vddio");
+
+	if (vdd_2v8 != NULL)
+	{
+		dev_err(&pdev->dev,"%s: vdd_2v8 is not NULL\n", __func__);
+		regulator_set_voltage(vdd_2v8, 2704000, 3304000);
+		regulator_set_load(vdd_2v8, 200000);
+		rc = regulator_enable(vdd_2v8);
+                if (rc) {
+			dev_err(&pdev->dev,"%s: regulator_enable fail\n", __func__);
+                }
+	}
+	else
+		dev_err(&pdev->dev,"%s: vdd_2v8 is NULL\n", __func__);
+
+	msleep(10);
+
+	if (vdd_1v8 != NULL)
+	{
+		dev_err(&pdev->dev,"%s: vdd_1v8 is not NULL\n", __func__);
+		regulator_set_voltage(vdd_1v8, 1704000, 1952000);
+		regulator_set_load(vdd_1v8, 200000);
+		rc = regulator_enable(vdd_1v8);
+		if (rc) {
+			dev_err(&pdev->dev,"%s: regulator_enable fail\n", __func__);
+		}
+	}
+	else
+		dev_err(&pdev->dev,"%s: vdd_1v8 is NULL\n", __func__);
+#endif//VENDOR_EDIT
 
 	rc = of_property_read_u32(pdev->dev.of_node, adsp_dt, &adsp_state);
 	if (rc) {
@@ -333,6 +369,8 @@ static int adsp_loader_probe(struct platform_device *pdev)
 	int fw_name_size;
 	u32 adsp_var_idx = 0;
 	int ret = 0;
+	u32 adsp_fuse_not_supported = 0;
+	const char *adsp_fw_name;
 
 	ret = adsp_loader_init_sysfs(pdev);
 	if (ret != 0) {
@@ -344,13 +382,56 @@ static int adsp_loader_probe(struct platform_device *pdev)
 	/* get adsp variant idx */
 	cell = nvmem_cell_get(&pdev->dev, "adsp_variant");
 	if (IS_ERR_OR_NULL(cell)) {
-		dev_dbg(&pdev->dev, "%s: FAILED to get nvmem cell \n", __func__);
+		dev_dbg(&pdev->dev, "%s: FAILED to get nvmem cell \n",
+			__func__);
+
+		/*
+		 * When ADSP variant read from fuse register is not
+		 * supported, check if image with different fw image
+		 * name needs to be loaded
+		 */
+		ret = of_property_read_u32(pdev->dev.of_node,
+					  "adsp-fuse-not-supported",
+					  &adsp_fuse_not_supported);
+		if (ret) {
+			dev_dbg(&pdev->dev,
+				"%s: adsp_fuse_not_supported prop not found %d\n",
+				__func__, ret);
+			goto wqueue;
+		}
+
+		if (adsp_fuse_not_supported) {
+			/* Read ADSP firmware image name */
+			ret = of_property_read_string(pdev->dev.of_node,
+						"adsp-fw-name",
+						 &adsp_fw_name);
+			if (ret < 0) {
+				dev_dbg(&pdev->dev, "%s: unable to read fw-name\n",
+					__func__);
+				goto wqueue;
+			}
+
+			fw_name_size = strlen(adsp_fw_name) + 1;
+			priv->adsp_fw_name = devm_kzalloc(&pdev->dev,
+						fw_name_size,
+						GFP_KERNEL);
+			if (!priv->adsp_fw_name)
+				goto wqueue;
+			strlcpy(priv->adsp_fw_name, adsp_fw_name,
+				fw_name_size);
+		}
 		goto wqueue;
 	}
 	buf = nvmem_cell_read(cell, &len);
 	nvmem_cell_put(cell);
-	if (IS_ERR_OR_NULL(buf) || len <= 0 || len > sizeof(u32)) {
+	if (IS_ERR_OR_NULL(buf)) {
 		dev_dbg(&pdev->dev, "%s: FAILED to read nvmem cell \n", __func__);
+		goto wqueue;
+	}
+	if (len <= 0 || len > sizeof(u32)) {
+		dev_dbg(&pdev->dev, "%s: nvmem cell length out of range: %zu\n",
+			__func__, len);
+		kfree(buf);
 		goto wqueue;
 	}
 	memcpy(&adsp_var_idx, buf, len);

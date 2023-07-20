@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  */
 #ifndef __WCD_MBHC_V2_H__
 #define __WCD_MBHC_V2_H__
@@ -130,9 +130,17 @@ do {                                                    \
 				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
 				  SND_JACK_BTN_4 | SND_JACK_BTN_5)
 #define OCP_ATTEMPT 20
+#ifndef OPLUS_ARCH_EXTENDS
 #define HS_DETECT_PLUG_TIME_MS (3 * 1000)
+#else /* OPLUS_ARCH_EXTENDS */
+#define HS_DETECT_PLUG_TIME_MS (5 * 1000)
+#endif /* OPLUS_ARCH_EXTENDS */
 #define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
+#ifndef OPLUS_ARCH_EXTENDS
 #define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
+#else
+#define MBHC_BUTTON_PRESS_THRESHOLD_MIN 1000
+#endif
 #define GND_MIC_SWAP_THRESHOLD 4
 #define GND_MIC_USBC_SWAP_THRESHOLD 2
 #define WCD_FAKE_REMOVAL_MIN_PERIOD_MS 100
@@ -140,6 +148,8 @@ do {                                                    \
 #define FW_READ_ATTEMPTS 15
 #define FW_READ_TIMEOUT 4000000
 #define FAKE_REM_RETRY_ATTEMPTS 3
+#define HPHL_CROSS_CONN_THRESHOLD 100
+#define HPHR_CROSS_CONN_THRESHOLD 100
 
 #define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  50
 #define ANC_DETECT_RETRY_CNT 7
@@ -451,6 +461,14 @@ struct wcd_mbhc_register {
 };
 
 struct wcd_mbhc_cb {
+	void (*update_cross_conn_thr)
+		(struct wcd_mbhc *mbhc);
+	void (*mbhc_surge_ctl)
+		(struct wcd_mbhc *mbhc, bool surge_en);
+	void (*mbhc_comp_autozero_control)
+		(struct wcd_mbhc *mbhc, bool az_enable);
+	void (*get_micbias_val)
+		(struct wcd_mbhc *mbhc, int *mb);
 	void (*bcs_enable)
 		(struct wcd_mbhc *mbhc, bool bcs_enable);
 	int (*enable_mb_source)(struct wcd_mbhc *mbhc, bool turn_on);
@@ -546,6 +564,8 @@ struct wcd_mbhc {
 	u32 moist_vref;
 	u32 moist_iref;
 	u32 moist_rref;
+	u32 hphl_cross_conn_thr;
+	u32 hphr_cross_conn_thr;
 	u8 micbias1_cap_mode; /* track ext cap setting */
 	u8 micbias2_cap_mode; /* track ext cap setting */
 	bool hs_detect_work_stop;
@@ -580,6 +600,12 @@ struct wcd_mbhc {
 	struct snd_soc_jack button_jack;
 	struct mutex codec_resource_lock;
 
+	#ifdef OPLUS_ARCH_EXTENDS
+	bool use_usbc_detect;
+	bool usbc_analog_status;
+	struct delayed_work mbhc_usbc_detect_dwork;
+	#endif /* OPLUS_ARCH_EXTENDS */
+
 	/* Holds codec specific interrupt mapping */
 	const struct wcd_mbhc_intr *intr_ids;
 
@@ -604,6 +630,24 @@ struct wcd_mbhc {
 	bool force_linein;
 	struct device_node *fsa_np;
 	struct notifier_block fsa_nb;
+
+	#ifdef OPLUS_ARCH_EXTENDS
+	bool need_cross_conn;
+	#endif /* OPLUS_ARCH_EXTENDS */
+	#ifdef OPLUS_ARCH_EXTENDS
+	struct delayed_work hp_detect_work;
+	#endif /* OPLUS_ARCH_EXTENDS */
+#ifdef OPLUS_ARCH_EXTENDS
+        bool irq_trigger_enable;
+        struct delayed_work mech_irq_trigger_dwork;
+#endif /* OPLUS_ARCH_EXTENDS */
+	#ifdef OPLUS_ARCH_EXTENDS
+	bool headset_bias_alwayon;
+	#endif /* OPLUS_ARCH_EXTENDS */
+
+	#ifdef OPLUS_FEATURE_IMPEDANCE_MATCH
+	bool enable_hp_impedance_detect;
+	#endif /* OPLUS_FEATURE_IMPEDANCE_MATCH */
 };
 
 void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,

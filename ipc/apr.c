@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2010-2014, 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2014, 2016-2020 The Linux Foundation. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -313,6 +313,10 @@ static void apr_adsp_up(void)
 		schedule_work(&apr_priv->add_chld_dev_work);
 	spin_unlock(&apr_priv->apr_lock);
 	snd_event_notify(apr_priv->dev, SND_EVENT_UP);
+
+	#ifdef OPLUS_FEATURE_ADSP_RECOVERY
+	oplus_set_ssr_state(false);
+	#endif
 }
 
 int apr_load_adsp_image(void)
@@ -1117,9 +1121,9 @@ static int __init apr_debug_init(void)
 }
 #else
 static int __init apr_debug_init(void)
-(
+{
 	return 0;
-)
+}
 #endif
 
 static void apr_cleanup(void)
@@ -1140,7 +1144,9 @@ static void apr_cleanup(void)
 				mutex_destroy(&client[i][j].svc[k].m_lock);
 		}
 	}
+#ifdef CONFIG_DEBUG_FS
 	debugfs_remove(debugfs_apr_debug);
+#endif
 }
 
 static int apr_probe(struct platform_device *pdev)
